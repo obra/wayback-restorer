@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 from sp_recovery.discovery import (
     CaptureRecord,
     build_cdx_query_url,
+    canonicalize_by_original_url,
     choose_canonical_capture,
     parse_cdx_rows,
 )
@@ -100,3 +101,31 @@ def test_choose_canonical_prefers_200_over_non_200() -> None:
 
     assert canonical is not None
     assert canonical.original == "http://www.somethingpositive.net/sp12312023.html"
+
+
+def test_canonicalize_by_original_url_dedupes_www_and_default_port() -> None:
+    captures = [
+        CaptureRecord(
+            timestamp="20020206141527",
+            original="http://www.somethingpositive.net:80/sp01012002.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="A",
+        ),
+        CaptureRecord(
+            timestamp="20020206142000",
+            original="http://somethingpositive.net/sp01012002.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="B",
+        ),
+    ]
+
+    canonical = canonicalize_by_original_url(captures)
+
+    assert len(canonical) == 1
+    selected = next(iter(canonical.values()))
+    assert selected.original in {
+        "http://www.somethingpositive.net:80/sp01012002.html",
+        "http://somethingpositive.net/sp01012002.html",
+    }

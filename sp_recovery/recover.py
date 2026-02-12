@@ -12,6 +12,7 @@ from urllib.request import Request, urlopen
 
 from sp_recovery.discovery import CaptureRecord
 from sp_recovery.io_utils import sha256_hex, write_bytes
+from sp_recovery.url_utils import normalize_site_host
 
 Fetcher = Callable[[str], tuple[int, bytes]]
 
@@ -42,7 +43,7 @@ def build_wayback_replay_url(timestamp: str, original_url: str) -> str:
 
 def local_relpath_from_original(original_url: str) -> str:
     parsed = urlparse(original_url)
-    host = parsed.netloc
+    host = normalize_site_host(parsed.netloc)
     path = parsed.path or "/"
     if path.endswith("/"):
         path = f"{path}index.html"

@@ -9,6 +9,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from sp_recovery.url_utils import canonical_identity_key
+
 CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
 DEFAULT_FIELDS = ("timestamp", "original", "mimetype", "statuscode", "digest")
 # Preferred by Jesse: prioritize latest pre-outage captures first.
@@ -135,13 +137,13 @@ def canonicalize_by_original_url(
 ) -> dict[str, CaptureRecord]:
     grouped: dict[str, list[CaptureRecord]] = {}
     for capture in captures:
-        grouped.setdefault(capture.original, []).append(capture)
+        grouped.setdefault(canonical_identity_key(capture.original), []).append(capture)
 
     canonical: dict[str, CaptureRecord] = {}
-    for original_url, options in grouped.items():
+    for identity_key, options in grouped.items():
         selected = choose_canonical_capture(options, preferred_windows=preferred_windows)
         if selected is not None:
-            canonical[original_url] = selected
+            canonical[identity_key] = selected
 
     return canonical
 

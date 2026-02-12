@@ -14,11 +14,19 @@ from sp_recovery.recover import (
 def test_local_relpath_from_original_is_deterministic() -> None:
     assert (
         local_relpath_from_original("http://www.somethingpositive.net/sp02012024.html")
-        == "www.somethingpositive.net/sp02012024.html"
+        == "somethingpositive.net/sp02012024.html"
     )
     assert (
         local_relpath_from_original("http://somethingpositive.net/")
         == "somethingpositive.net/index.html"
+    )
+    assert (
+        local_relpath_from_original("http://www.somethingpositive.net:80/sp02012024.html")
+        == "somethingpositive.net/sp02012024.html"
+    )
+    assert (
+        local_relpath_from_original("https://somethingpositive.net:443/sp02012024.html")
+        == "somethingpositive.net/sp02012024.html"
     )
 
 
@@ -39,7 +47,7 @@ def test_recover_capture_skips_existing_files(tmp_path: Path) -> None:
         statuscode=200,
         digest="D",
     )
-    existing_path = tmp_path / "www.somethingpositive.net" / "sp02012024.html"
+    existing_path = tmp_path / "somethingpositive.net" / "sp02012024.html"
     existing_path.parent.mkdir(parents=True, exist_ok=True)
     existing_path.write_bytes(b"already here")
 
@@ -49,7 +57,7 @@ def test_recover_capture_skips_existing_files(tmp_path: Path) -> None:
     result = recover_capture(capture, output_root=tmp_path, fetcher=fetcher)
 
     assert result.status == "skipped_existing"
-    assert result.local_path.endswith("www.somethingpositive.net/sp02012024.html")
+    assert result.local_path.endswith("somethingpositive.net/sp02012024.html")
 
 
 def test_recover_capture_emits_provenance_fields(tmp_path: Path) -> None:

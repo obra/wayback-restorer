@@ -11,8 +11,8 @@ from urllib.parse import urljoin, urlparse
 
 from sp_recovery.io_utils import ensure_parent_dir
 from sp_recovery.recover import ProvenanceRecord, local_relpath_from_original
+from sp_recovery.url_utils import canonical_internal_url, is_internal_site_netloc
 
-INTERNAL_HOSTS = {"somethingpositive.net", "www.somethingpositive.net"}
 _ATTR_PATTERN = re.compile(
     r"(?P<attr>href|src)=(?P<quote>['\"])(?P<value>.*?)(?P=quote)",
     re.IGNORECASE,
@@ -23,6 +23,13 @@ _ATTR_PATTERN = re.compile(
 class RewriteResult:
     html: str
     unresolved_targets: list[tuple[str, str]]
+
+
+@dataclass(frozen=True, slots=True)
+class InternalTarget:
+    normalized_url: str
+    local_path: str
+    fragment: str
 
 
 def _extract_wayback_original(absolute_url: str) -> str:
@@ -42,7 +49,7 @@ def _extract_wayback_original(absolute_url: str) -> str:
     return absolute_url
 
 
-def _normalize_internal_target(raw_value: str, page_original_url: str) -> tuple[str, str] | None:
+def _resolve_internal_target(raw_value: str, page_original_url: str) -> InternalTarget | None:
     lowered = raw_value.lower()
     if lowered.startswith(("#", "mailto:", "javascript:", "data:")):
         return None
@@ -53,12 +60,19 @@ def _normalize_internal_target(raw_value: str, page_original_url: str) -> tuple[
 
     if parsed.scheme not in {"http", "https"}:
         return None
-    if parsed.netloc not in INTERNAL_HOSTS:
+    if not is_internal_site_netloc(parsed.netloc):
+        return None
+    if parsed.query:
         return None
 
-    local_path = local_relpath_from_original(original)
-    suffix = f"#{parsed.fragment}" if parsed.fragment else ""
-    return local_path, suffix
+    normalized_url = canonical_internal_url(original)
+    local_path = local_relpath_from_original(normalized_url)
+    fragment = parsed.fragment
+    return InternalTarget(
+        normalized_url=normalized_url,
+        local_path=local_path,
+        fragment=fragment,
+    )
 
 
 def rewrite_html(
@@ -74,11 +88,12 @@ def rewrite_html(
         quote = match.group("quote")
         raw_value = match.group("value")
 
-        normalized = _normalize_internal_target(raw_value, page_original_url)
-        if normalized is None:
+        resolved = _resolve_internal_target(raw_value, page_original_url)
+        if resolved is None:
             return match.group(0)
 
-        local_path, suffix = normalized
+        suffix = f"#{resolved.fragment}" if resolved.fragment else ""
+        local_path = resolved.local_path
         if local_path not in known_local_paths:
             unresolved.append((page_original_url, local_path))
 
@@ -87,6 +102,21 @@ def rewrite_html(
 
     rewritten_html = _ATTR_PATTERN.sub(replace, html)
     return RewriteResult(html=rewritten_html, unresolved_targets=unresolved)
+
+
+def extract_internal_asset_urls(html: str, *, page_original_url: str) -> list[str]:
+    assets: list[str] = []
+    for match in _ATTR_PATTERN.finditer(html):
+        attr = match.group("attr").lower()
+        if attr != "src":
+            continue
+        raw_value = match.group("value")
+        resolved = _resolve_internal_target(raw_value, page_original_url)
+        if resolved is None:
+            continue
+        assets.append(resolved.normalized_url)
+
+    return list(dict.fromkeys(assets))
 
 
 def write_unresolved_links_csv(path: Path, unresolved_targets: list[tuple[str, str]]) -> None:

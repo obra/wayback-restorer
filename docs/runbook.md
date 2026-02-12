@@ -31,6 +31,7 @@ Provide a repeatable, low-impact process to rebuild an independently hostable mi
 - Keep one canonical recovered copy per original URL.
 - Collapse CDX discovery by URL key to reduce duplicates at source.
 - Ignore query/fragment URL variants during recovery target selection.
+- Normalize host variants (`somethingpositive.net`, `www.somethingpositive.net`, default ports) to one mirror identity.
 - Avoid repeated broad re-harvesting; target unresolved gaps only.
 
 ## Recovery Execution
@@ -42,6 +43,7 @@ Provide a repeatable, low-impact process to rebuild an independently hostable mi
 2. Recovery
 - Fetch canonical captures through replay URLs in `id_` mode.
 - Store locally using deterministic path mapping.
+- Run an internal-asset pass for recovered HTML pages so strip images and required static resources are mirrored locally.
 
 3. Rewrite
 - Rewrite internal links (`href`, `src`) to local mirror paths.

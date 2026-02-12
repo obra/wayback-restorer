@@ -14,16 +14,16 @@ def test_rewrite_html_converts_internal_links_to_local_paths() -> None:
 
     result = rewrite_html(
         html,
-        page_original_url="http://www.somethingpositive.net/sp02012024.html",
+        page_original_url="http://www.somethingpositive.net:80/sp02012024.html",
         known_local_paths={
-            "www.somethingpositive.net/sp02022024.html",
-            "www.somethingpositive.net/arch/sp02012024.gif",
+            "somethingpositive.net/sp02022024.html",
+            "somethingpositive.net/arch/sp02012024.gif",
         },
     )
 
     assert isinstance(result, RewriteResult)
-    assert 'href="/www.somethingpositive.net/sp02022024.html"' in result.html
-    assert 'src="/www.somethingpositive.net/arch/sp02012024.gif"' in result.html
+    assert 'href="/somethingpositive.net/sp02022024.html"' in result.html
+    assert 'src="/somethingpositive.net/arch/sp02012024.gif"' in result.html
     assert 'href="https://example.org/post"' in result.html
     assert result.unresolved_targets == []
 
@@ -42,5 +42,5 @@ def test_unresolved_internal_targets_are_written_to_csv(tmp_path: Path) -> None:
     assert lines[0] == "source_url,target_local_path"
     assert (
         lines[1]
-        == "http://www.somethingpositive.net/sp02012024.html,www.somethingpositive.net/sp99999999.html"
+        == "http://www.somethingpositive.net/sp02012024.html,somethingpositive.net/sp99999999.html"
     )

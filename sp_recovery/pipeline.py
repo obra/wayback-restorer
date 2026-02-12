@@ -16,9 +16,15 @@ from sp_recovery.discovery import (
     fetch_cdx_records,
 )
 from sp_recovery.io_utils import read_jsonl, write_jsonl
-from sp_recovery.recover import Fetcher, ProvenanceRecord, recover_captures
+from sp_recovery.recover import (
+    Fetcher,
+    ProvenanceRecord,
+    local_relpath_from_original,
+    recover_captures,
+)
 from sp_recovery.reporting import build_gap_register, compute_coverage, write_reports
-from sp_recovery.rewrite import rewrite_recovered_html_files
+from sp_recovery.rewrite import extract_internal_asset_urls, rewrite_recovered_html_files
+from sp_recovery.url_utils import canonical_identity_key
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +48,10 @@ def _record_in_window(record: CaptureRecord, config: RecoveryConfig) -> bool:
     if parsed.query or parsed.fragment:
         return False
     return config.from_timestamp <= record.timestamp <= config.effective_to_timestamp
+
+
+def _normalized_missing_keys(config: RecoveryConfig) -> set[str]:
+    return {canonical_identity_key(url) for url in config.only_missing_urls}
 
 
 def _recovery_order_key(record: CaptureRecord) -> tuple[int, tuple[int, int, int], int, str]:
@@ -113,21 +123,23 @@ def _provenance_from_rows(rows: Sequence[dict[str, object]]) -> list[ProvenanceR
 
 
 def discover_phase(config: RecoveryConfig) -> tuple[list[CaptureRecord], list[CaptureRecord]]:
-    discovered = fetch_cdx_records(
+    discovered_raw = fetch_cdx_records(
         domain=config.domain,
         from_timestamp=config.from_timestamp,
         to_timestamp=config.effective_to_timestamp,
         limit=max(config.max_canonical * 20, 5000) if config.max_canonical else 50000,
     )
+    discovered = [record for record in discovered_raw if _record_in_window(record, config)]
 
     canonical_map = canonicalize_by_original_url(discovered)
     canonical_all = sorted(canonical_map.values(), key=_recovery_order_key)
 
     if config.only_missing_urls:
+        missing_keys = _normalized_missing_keys(config)
         canonical_all = [
             record
             for record in canonical_all
-            if record.original in config.only_missing_urls
+            if canonical_identity_key(record.original) in missing_keys
         ]
 
     if config.max_canonical > 0:
@@ -150,6 +162,46 @@ def recover_phase(
         request_interval_seconds=config.request_interval_seconds,
         fetcher=fetcher,
     )
+
+
+def _build_referenced_asset_captures(
+    output_root: Path,
+    provenance_records: Sequence[ProvenanceRecord],
+) -> list[CaptureRecord]:
+    existing_local_paths = {
+        record.local_path
+        for record in provenance_records
+        if record.status in {"recovered", "skipped_existing"}
+    }
+    candidates: dict[str, CaptureRecord] = {}
+
+    for record in provenance_records:
+        if record.status not in {"recovered", "skipped_existing"}:
+            continue
+        if not record.local_path.lower().endswith((".html", ".htm")):
+            continue
+
+        page_path = output_root / record.local_path
+        if not page_path.exists():
+            continue
+
+        html = page_path.read_text(encoding="utf-8", errors="ignore")
+        for asset_url in extract_internal_asset_urls(html, page_original_url=record.original_url):
+            local_path = local_relpath_from_original(asset_url)
+            if local_path in existing_local_paths:
+                continue
+            if asset_url in candidates:
+                continue
+
+            candidates[asset_url] = CaptureRecord(
+                timestamp=record.timestamp,
+                original=asset_url,
+                mimetype="application/octet-stream",
+                statuscode=200,
+                digest=None,
+            )
+
+    return sorted(candidates.values(), key=lambda record: record.original)
 
 
 def report_phase(
@@ -196,7 +248,12 @@ def run_pipeline(
         canonical_map = canonicalize_by_original_url(discovered)
         canonical = sorted(canonical_map.values(), key=_recovery_order_key)
         if config.only_missing_urls:
-            canonical = [record for record in canonical if record.original in config.only_missing_urls]
+            missing_keys = _normalized_missing_keys(config)
+            canonical = [
+                record
+                for record in canonical
+                if canonical_identity_key(record.original) in missing_keys
+            ]
         if config.max_canonical > 0:
             canonical = canonical[: config.max_canonical]
 
@@ -204,6 +261,9 @@ def run_pipeline(
     write_jsonl(canonical_file, [capture_to_dict(record) for record in canonical])
 
     recovered = recover_phase(config, canonical, fetcher=fetcher)
+    referenced_assets = _build_referenced_asset_captures(config.output_root, recovered)
+    if referenced_assets:
+        recovered.extend(recover_phase(config, referenced_assets, fetcher=fetcher))
     write_jsonl(provenance_file, [record.as_dict() for record in recovered])
 
     rewrite_recovered_html_files(
