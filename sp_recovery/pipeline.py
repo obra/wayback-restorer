@@ -16,9 +16,10 @@ from sp_recovery.discovery import (
     capture_to_dict,
     fetch_cdx_records,
 )
-from sp_recovery.io_utils import read_jsonl, write_jsonl
+from sp_recovery.io_utils import append_jsonl, read_jsonl, write_jsonl
 from sp_recovery.recover import (
     Fetcher,
+    ProvenanceCallback,
     ProvenanceRecord,
     local_relpath_from_original,
     recover_captures,
@@ -172,6 +173,7 @@ def recover_phase(
     canonical_records: Sequence[CaptureRecord],
     *,
     fetcher: Fetcher | None = None,
+    on_record: ProvenanceCallback | None = None,
 ) -> list[ProvenanceRecord]:
     return recover_captures(
         canonical_records,
@@ -180,6 +182,7 @@ def recover_phase(
         fetcher=fetcher,
         canonical_host=config.canonical_host,
         equivalent_hosts=config.equivalent_hosts,
+        on_record=on_record,
     )
 
 
@@ -299,8 +302,12 @@ def run_pipeline(
 
     write_jsonl(discovered_file, [capture_to_dict(record) for record in discovered])
     write_jsonl(canonical_file, [capture_to_dict(record) for record in canonical])
+    write_jsonl(provenance_file, [])
 
-    recovered = recover_phase(config, canonical, fetcher=fetcher)
+    def _append_provenance(record: ProvenanceRecord) -> None:
+        append_jsonl(provenance_file, record.as_dict())
+
+    recovered = recover_phase(config, canonical, fetcher=fetcher, on_record=_append_provenance)
     referenced_assets = _build_referenced_asset_captures(
         config.output_root,
         recovered,
@@ -308,8 +315,14 @@ def run_pipeline(
         equivalent_hosts=config.equivalent_hosts,
     )
     if referenced_assets:
-        recovered.extend(recover_phase(config, referenced_assets, fetcher=fetcher))
-    write_jsonl(provenance_file, [record.as_dict() for record in recovered])
+        recovered.extend(
+            recover_phase(
+                config,
+                referenced_assets,
+                fetcher=fetcher,
+                on_record=_append_provenance,
+            )
+        )
 
     rewrite_recovered_html_files(
         config.output_root,

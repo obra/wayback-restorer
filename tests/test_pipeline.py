@@ -57,6 +57,52 @@ def test_run_pipeline_creates_mirror_state_and_reports(tmp_path: Path) -> None:
     assert b"arch/sp02012018.gif" in html_file.read_bytes()
 
 
+def test_run_pipeline_appends_provenance_records_during_recovery(tmp_path: Path) -> None:
+    captures = [
+        CaptureRecord(
+            timestamp="20180201120000",
+            original="http://www.somethingpositive.net/sp1.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="A",
+        ),
+        CaptureRecord(
+            timestamp="20180201120001",
+            original="http://www.somethingpositive.net/sp2.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="B",
+        ),
+    ]
+    calls = {"count": 0}
+
+    def fetcher(_: str) -> tuple[int, bytes]:
+        calls["count"] += 1
+        if calls["count"] == 2:
+            provenance_file = tmp_path / "state" / "provenance.jsonl"
+            lines = provenance_file.read_text(encoding="utf-8").splitlines()
+            assert len(lines) == 1
+            first = json.loads(lines[0])
+            assert first["original_url"] == "http://www.somethingpositive.net/sp1.html"
+        return (200, b"<html></html>")
+
+    config = RecoveryConfig(
+        domain="somethingpositive.net",
+        from_date="2001-01-01",
+        to_date="2019-12-31",
+        output_root=tmp_path,
+        max_canonical=2,
+        request_interval_seconds=0.0,
+        only_missing_urls=set(),
+        modern_cutoff_date="2020-01-01",
+    )
+
+    run_pipeline(config, discovered_records=captures, fetcher=fetcher)
+
+    provenance_lines = (tmp_path / "state" / "provenance.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(provenance_lines) == 2
+
+
 def test_run_pipeline_can_target_only_missing_urls(tmp_path: Path) -> None:
     captures = [
         CaptureRecord(

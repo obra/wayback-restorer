@@ -20,6 +20,7 @@ from sp_recovery.url_utils import (
 )
 
 Fetcher = Callable[[str], tuple[int, bytes]]
+ProvenanceCallback = Callable[["ProvenanceRecord"], None]
 DEFAULT_FETCH_RETRIES = 3
 
 
@@ -148,20 +149,22 @@ def recover_captures(
     fetcher: Fetcher | None = None,
     canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
     equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
+    on_record: ProvenanceCallback | None = None,
 ) -> list[ProvenanceRecord]:
     recovered: list[ProvenanceRecord] = []
     for index, capture in enumerate(captures):
         if index > 0 and request_interval_seconds > 0:
             time.sleep(request_interval_seconds)
 
-        recovered.append(
-            recover_capture(
-                capture,
-                output_root=output_root,
-                fetcher=fetcher,
-                canonical_host=canonical_host,
-                equivalent_hosts=equivalent_hosts,
-            )
+        record = recover_capture(
+            capture,
+            output_root=output_root,
+            fetcher=fetcher,
+            canonical_host=canonical_host,
+            equivalent_hosts=equivalent_hosts,
         )
+        recovered.append(record)
+        if on_record is not None:
+            on_record(record)
 
     return recovered

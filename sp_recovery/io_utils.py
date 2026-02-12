@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any, Iterable
 
 
@@ -14,7 +16,17 @@ def ensure_parent_dir(path: Path) -> None:
 
 def write_bytes(path: Path, payload: bytes) -> None:
     ensure_parent_dir(path)
-    path.write_bytes(payload)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
 
 
 def sha256_hex(payload: bytes) -> str:

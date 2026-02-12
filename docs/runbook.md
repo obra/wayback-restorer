@@ -23,6 +23,7 @@ Provide a repeatable, low-impact process to rebuild an independently hostable mi
 ### Provenance
 
 - Log one provenance record per artifact with original URL, capture timestamp, replay URL, hash, and recovery status.
+- Append provenance records incrementally during recovery to support interruption forensics and safe reruns.
 - Preserve source snapshot references in exportable manifest files.
 - Never mark inferred placeholders as recovered originals.
 
@@ -32,6 +33,7 @@ Provide a repeatable, low-impact process to rebuild an independently hostable mi
 - Collapse CDX discovery by URL key to reduce duplicates at source.
 - Ignore query/fragment URL variants during recovery target selection.
 - Normalize host variants (`somethingpositive.net`, `www.somethingpositive.net`, default ports) to one mirror identity.
+- Write recovered artifacts via atomic replace to avoid partial-file corruption on interruption.
 - Avoid repeated broad re-harvesting; target unresolved gaps only.
 
 ## Recovery Execution

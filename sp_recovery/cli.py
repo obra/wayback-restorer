@@ -17,13 +17,14 @@ from sp_recovery.config import (
     normalize_equivalent_hosts,
 )
 from sp_recovery.discovery import capture_from_dict, capture_to_dict
-from sp_recovery.io_utils import read_jsonl, write_jsonl
+from sp_recovery.io_utils import append_jsonl, read_jsonl, write_jsonl
 from sp_recovery.pipeline import (
     discover_phase,
     recover_phase,
     run_pipeline,
     run_report_only,
 )
+from sp_recovery.recover import ProvenanceRecord
 from sp_recovery.rewrite import rewrite_recovered_html_files
 from sp_recovery.url_utils import canonical_identity_key
 
@@ -119,8 +120,13 @@ def _recover_command(args: argparse.Namespace) -> int:
             in missing_keys
         ]
 
-    recovered = recover_phase(config, canonical_records)
-    write_jsonl(state_dir / "provenance.jsonl", [row.as_dict() for row in recovered])
+    provenance_file = state_dir / "provenance.jsonl"
+    write_jsonl(provenance_file, [])
+
+    def _append_provenance(record: ProvenanceRecord) -> None:
+        append_jsonl(provenance_file, record.as_dict())
+
+    recovered = recover_phase(config, canonical_records, on_record=_append_provenance)
 
     rewrite_recovered_html_files(
         config.output_root,

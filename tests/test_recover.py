@@ -8,6 +8,7 @@ from sp_recovery.recover import (
     build_wayback_replay_url,
     local_relpath_from_original,
     recover_capture,
+    recover_captures,
 )
 
 
@@ -114,3 +115,42 @@ def test_recover_capture_retries_after_transient_fetch_error(tmp_path: Path) -> 
 
     assert attempts["count"] == 2
     assert result.status == "recovered"
+
+
+def test_recover_captures_invokes_on_record_callback_for_each_capture(tmp_path: Path) -> None:
+    captures = [
+        CaptureRecord(
+            timestamp="20240201120000",
+            original="http://www.somethingpositive.net/sp02012024.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="A",
+        ),
+        CaptureRecord(
+            timestamp="20240201120001",
+            original="http://www.somethingpositive.net/sp02022024.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="B",
+        ),
+    ]
+    seen: list[str] = []
+
+    def fetcher(_: str) -> tuple[int, bytes]:
+        return (200, b"<html>ok</html>")
+
+    def on_record(record: ProvenanceRecord) -> None:
+        seen.append(record.original_url)
+
+    recover_captures(
+        captures,
+        output_root=tmp_path,
+        request_interval_seconds=0.0,
+        fetcher=fetcher,
+        on_record=on_record,
+    )
+
+    assert seen == [
+        "http://www.somethingpositive.net/sp02012024.html",
+        "http://www.somethingpositive.net/sp02022024.html",
+    ]
