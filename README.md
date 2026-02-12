@@ -26,6 +26,12 @@ Core tooling and tests are present for:
 4. Rewrite internal links for standalone browsing.
 5. Generate coverage report, gap register, and provenance manifest.
 
+## Default Recovery Policy
+
+- Pre-modern only: captures on/after `2020-01-01` are excluded by default.
+- Date window defaults to `2001-01-01` through `2019-12-31`.
+- Recovery ordering is oldest comic pages first, then related assets/pages.
+
 See `docs/runbook.md` for the complete operational workflow.
 
 ## Legal Notes

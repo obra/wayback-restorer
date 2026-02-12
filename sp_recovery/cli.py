@@ -9,6 +9,7 @@ from typing import Sequence
 from sp_recovery.config import (
     DEFAULT_DOMAIN,
     DEFAULT_FROM_DATE,
+    DEFAULT_MODERN_CUTOFF_DATE,
     DEFAULT_TO_DATE,
     RecoveryConfig,
     load_missing_urls_from_gap_csv,
@@ -28,6 +29,11 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--domain", default=DEFAULT_DOMAIN)
     parser.add_argument("--from-date", default=DEFAULT_FROM_DATE)
     parser.add_argument("--to-date", default=DEFAULT_TO_DATE)
+    parser.add_argument(
+        "--modern-cutoff-date",
+        default=DEFAULT_MODERN_CUTOFF_DATE,
+        help="Exclude captures on/after this date (YYYY-MM-DD).",
+    )
     parser.add_argument("--output-root", default="output/mirror")
     parser.add_argument("--max-canonical", type=int, default=0)
     parser.add_argument("--request-interval-seconds", type=float, default=2.0)
@@ -44,6 +50,7 @@ def _config_from_args(args: argparse.Namespace) -> RecoveryConfig:
         domain=args.domain,
         from_date=args.from_date,
         to_date=args.to_date,
+        modern_cutoff_date=args.modern_cutoff_date,
         output_root=Path(args.output_root),
         max_canonical=max(args.max_canonical, 0),
         request_interval_seconds=max(args.request_interval_seconds, 0.0),

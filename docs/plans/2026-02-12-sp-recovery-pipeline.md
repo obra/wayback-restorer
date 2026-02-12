@@ -4,7 +4,7 @@
 
 **Goal:** Build an archive-friendly recovery pipeline that reconstructs a hostable Something Positive mirror with provenance, coverage reporting, and explicit gap tracking.
 
-**Architecture:** Use a single Python CLI package to run deterministic phases: discover capture metadata from CDX, select one canonical capture per URL, recover artifacts with conservative pacing, rewrite HTML links for local browsing, and generate reports/manifests. Canonical selection is date-window aware: first prefer captures from `2023-01-01` to `2025-02-01` (latest pre-outage era), then expand to `2021-01-01` to `2025-02-01`, and only then fall back to older history for unresolved gaps. Persist all intermediate state in JSONL/CSV so reruns only fetch missing items.
+**Architecture:** Use a single Python CLI package to run deterministic phases: discover capture metadata from CDX, select one canonical capture per URL, recover artifacts with conservative pacing, rewrite HTML links for local browsing, and generate reports/manifests. Canonical selection is pre-modern guarded: default to `2001-01-01` through `2019-12-31`, and exclude captures on/after `2020-01-01` unless policy changes. Persist all intermediate state in JSONL/CSV so reruns only fetch missing items.
 
 **Tech Stack:** Python 3.11+, pytest, standard library networking/parsing plus BeautifulSoup4 for robust HTML rewriting.
 
@@ -51,7 +51,7 @@ git commit -m "feat: scaffold sp recovery cli"
 - Add tests for:
   - parsing CDX JSON rows into records
   - resumption-key pagination request construction
-  - canonical capture scoring preferring `200` HTML/image and timestamps inside preferred windows (`2023-01-01` to `2025-02-01`, then `2021-01-01` to `2025-02-01`)
+  - canonical capture scoring preferring `200` HTML/image within pre-modern cutoff constraints
 
 **Step 2: Run test to verify it fails**
 Run: `python3 -m pytest tests/test_discovery.py -q`
@@ -203,13 +203,14 @@ git commit -m "docs: add sp recovery runbook and go-live guidance"
 Run: `python3 -m pytest -q`
 Expected: PASS.
 
-**Step 2: Run a low-volume dry run against IA (phase 1 window)**
+**Step 2: Run a low-volume dry run against IA (pre-modern window)**
 Run:
 ```bash
 python3 -m sp_recovery.cli run \
   --domain somethingpositive.net \
-  --from-year 2023 \
-  --to-year 2025 \
+  --from-date 2001-01-01 \
+  --to-date 2019-12-31 \
+  --modern-cutoff-date 2020-01-01 \
   --max-canonical 25 \
   --request-interval-seconds 2.0 \
   --output-root output/demo
@@ -221,8 +222,9 @@ Run:
 ```bash
 python3 -m sp_recovery.cli run \
   --domain somethingpositive.net \
-  --from-year 2021 \
-  --to-year 2025 \
+  --from-date 2001-01-01 \
+  --to-date 2019-12-31 \
+  --modern-cutoff-date 2020-01-01 \
   --only-missing-from output/demo/reports/gap_register.csv \
   --request-interval-seconds 2.0 \
   --output-root output/demo

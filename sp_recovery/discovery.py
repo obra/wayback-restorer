@@ -86,6 +86,7 @@ def build_cdx_query_url(
         "showResumeKey": "true",
         "matchType": "domain",
         "filter": "statuscode:200",
+        "collapse": "urlkey",
     }
     if resume_key:
         params["resumeKey"] = resume_key
@@ -167,7 +168,7 @@ def capture_from_dict(payload: dict[str, Any]) -> CaptureRecord:
 
 def _fetch_cdx_rows(url: str) -> list[list[str]]:
     request = Request(url, headers={"User-Agent": "sp-recovery/0.1 (+archive-friendly)"})
-    with urlopen(request, timeout=30) as response:
+    with urlopen(request, timeout=60) as response:
         payload = response.read().decode("utf-8")
     parsed = json.loads(payload)
     if not isinstance(parsed, list):

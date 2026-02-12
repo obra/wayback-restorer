@@ -1,0 +1,10 @@
+domain = "somethingpositive.net"
+from_date = "2001-01-01"
+to_date = "2019-12-31"
+modern_cutoff_date = "2020-01-01"
+max_canonical = 0
+request_interval_seconds = 2.0
+output_root = "output/mirror"
+
+# Optional gap-targeted rerun input (CSV with original_url column)
+# only_missing_from = "output/mirror/reports/gap_register.csv"

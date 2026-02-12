@@ -50,6 +50,7 @@ def test_build_cdx_query_url_adds_resume_key_only_when_present() -> None:
     assert query["from"] == ["20230101000000"]
     assert query["to"] == ["20250201000000"]
     assert query["showResumeKey"] == ["true"]
+    assert query["collapse"] == ["urlkey"]
     assert query["resumeKey"] == ["opaque-key"]
 
 

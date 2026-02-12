@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
 from typing import Sequence
+from urllib.parse import urlparse
 
 from sp_recovery.config import RecoveryConfig
 from sp_recovery.discovery import (
@@ -24,6 +26,59 @@ class PipelineRunResult:
     discovered_count: int
     canonical_count: int
     recovered_count: int
+
+
+_STRIP_PAGE_RE = re.compile(r"^/sp(?P<month>\d{2})(?P<day>\d{2})(?P<year>\d{4})\.html$", re.IGNORECASE)
+_STRIP_ASSET_RE = re.compile(
+    r"^/arch/sp(?P<month>\d{2})(?P<day>\d{2})(?P<year>\d{4})\.[A-Za-z0-9]+$",
+    re.IGNORECASE,
+)
+_FIRST_COMIC_PAGE_RE = re.compile(r"^/1stcomic-page(?P<page>\d+)\.html$", re.IGNORECASE)
+_ARCHIVE_YEAR_RE = re.compile(r"^/archive/(?P<year>\d{4})/?$")
+
+
+def _record_in_window(record: CaptureRecord, config: RecoveryConfig) -> bool:
+    parsed = urlparse(record.original)
+    if parsed.query or parsed.fragment:
+        return False
+    return config.from_timestamp <= record.timestamp <= config.effective_to_timestamp
+
+
+def _recovery_order_key(record: CaptureRecord) -> tuple[int, tuple[int, int, int], int, str]:
+    parsed = urlparse(record.original)
+    path = parsed.path or "/"
+
+    strip_page = _STRIP_PAGE_RE.match(path)
+    if strip_page:
+        year = int(strip_page.group("year"))
+        month = int(strip_page.group("month"))
+        day = int(strip_page.group("day"))
+        return (0, (year, month, day), int(record.timestamp), record.original)
+
+    strip_asset = _STRIP_ASSET_RE.match(path)
+    if strip_asset:
+        year = int(strip_asset.group("year"))
+        month = int(strip_asset.group("month"))
+        day = int(strip_asset.group("day"))
+        return (1, (year, month, day), int(record.timestamp), record.original)
+
+    first_comic = _FIRST_COMIC_PAGE_RE.match(path)
+    if first_comic:
+        page_number = int(first_comic.group("page"))
+        return (2, (2001, 1, page_number), int(record.timestamp), record.original)
+
+    archive_year = _ARCHIVE_YEAR_RE.match(path)
+    if archive_year:
+        year = int(archive_year.group("year"))
+        return (3, (year, 1, 1), int(record.timestamp), record.original)
+
+    if path in {"/", "/index.html"}:
+        return (6, (9999, 12, 31), int(record.timestamp), record.original)
+
+    if path.lower().endswith(".html") or path.endswith("/"):
+        return (4, (9999, 12, 31), int(record.timestamp), record.original)
+
+    return (5, (9999, 12, 31), int(record.timestamp), record.original)
 
 
 def _capture_rows_to_records(rows: Sequence[dict[str, object]]) -> list[CaptureRecord]:
@@ -61,12 +116,12 @@ def discover_phase(config: RecoveryConfig) -> tuple[list[CaptureRecord], list[Ca
     discovered = fetch_cdx_records(
         domain=config.domain,
         from_timestamp=config.from_timestamp,
-        to_timestamp=config.to_timestamp,
+        to_timestamp=config.effective_to_timestamp,
         limit=max(config.max_canonical * 20, 5000) if config.max_canonical else 50000,
     )
 
     canonical_map = canonicalize_by_original_url(discovered)
-    canonical_all = sorted(canonical_map.values(), key=lambda record: record.original)
+    canonical_all = sorted(canonical_map.values(), key=_recovery_order_key)
 
     if config.only_missing_urls:
         canonical_all = [
@@ -114,7 +169,10 @@ def report_phase(
         gaps=gaps,
         provenance_rows=provenance_rows,
         date_range_notes=[
-            f"{config.from_date} to {config.to_date}: Primary recovery execution window",
+            (
+                f"{config.from_date} to {config.to_date}: Requested query window "
+                f"(captures on/after {config.modern_cutoff_date} are excluded)."
+            ),
             "Older captures can be queried in targeted gap-focused reruns.",
         ],
     )
@@ -134,9 +192,9 @@ def run_pipeline(
     if discovered_records is None:
         discovered, canonical = discover_phase(config)
     else:
-        discovered = list(discovered_records)
+        discovered = [record for record in discovered_records if _record_in_window(record, config)]
         canonical_map = canonicalize_by_original_url(discovered)
-        canonical = sorted(canonical_map.values(), key=lambda record: record.original)
+        canonical = sorted(canonical_map.values(), key=_recovery_order_key)
         if config.only_missing_urls:
             canonical = [record for record in canonical if record.original in config.only_missing_urls]
         if config.max_canonical > 0:

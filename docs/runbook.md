@@ -7,9 +7,9 @@ Provide a repeatable, low-impact process to rebuild an independently hostable mi
 ## Inputs
 
 - Target domain: `somethingpositive.net` (+ `www.somethingpositive.net`)
-- Preferred capture window: `2023-01-01` to `2025-02-01`
-- Expansion window: `2021-01-01` to `2025-02-01`
-- Legacy fallback window: pre-2021 only for unresolved gaps
+- Default capture window: `2001-01-01` to `2019-12-31`
+- Pre-modern cutoff: captures on/after `2020-01-01` are excluded
+- Recovery order: earliest comic pages first (chronological), then related assets/pages
 
 ## Operational Safeguards
 
@@ -29,7 +29,8 @@ Provide a repeatable, low-impact process to rebuild an independently hostable mi
 ### Deduplication
 
 - Keep one canonical recovered copy per original URL.
-- Prefer highest-confidence capture in preferred windows.
+- Collapse CDX discovery by URL key to reduce duplicates at source.
+- Ignore query/fragment URL variants during recovery target selection.
 - Avoid repeated broad re-harvesting; target unresolved gaps only.
 
 ## Recovery Execution
@@ -53,9 +54,10 @@ Provide a repeatable, low-impact process to rebuild an independently hostable mi
 
 ## Rerun Strategy
 
-- Rerun phase 1 (`2023-01-01` to `2025-02-01`) only when new canonical URLs are discovered.
-- For missing items, rerun with expansion window (`2021-01-01` to `2025-02-01`) using gap-targeted mode.
-- For persistent gaps, run focused legacy lookups for specific URLs, not broad full-history sweeps.
+- Run baseline recovery in the pre-modern window (`2001-01-01` to `2019-12-31`).
+- For missing items, rerun gap-targeted discovery/recovery using `--only-missing-from` against the latest `gap_register.csv`.
+- For persistent gaps, run focused URL-level lookups before expanding query range.
+- If owner explicitly approves broader recovery windows, keep the pre-modern cutoff guard unless policy changes.
 
 ## Compliance Checklist
 
