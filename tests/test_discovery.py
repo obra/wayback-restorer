@@ -7,7 +7,9 @@ from sp_recovery.discovery import (
     build_cdx_query_url,
     canonicalize_by_original_url,
     choose_canonical_capture,
+    fetch_cdx_records,
     parse_cdx_rows,
+    split_cdx_rows_and_resume_key,
 )
 
 
@@ -129,3 +131,100 @@ def test_canonicalize_by_original_url_dedupes_www_and_default_port() -> None:
         "http://www.somethingpositive.net:80/sp01012002.html",
         "http://somethingpositive.net/sp01012002.html",
     }
+
+
+def test_split_cdx_rows_and_resume_key_handles_wayback_json_shape() -> None:
+    payload = [
+        ["timestamp", "original", "mimetype", "statuscode", "digest"],
+        ["20020206001945", "http://www.somethingpositive.net:80/", "text/html", "200", "A"],
+        [],
+        ["opaque-resume-key"],
+    ]
+
+    rows, resume_key = split_cdx_rows_and_resume_key(payload)
+
+    assert rows == [
+        ["timestamp", "original", "mimetype", "statuscode", "digest"],
+        ["20020206001945", "http://www.somethingpositive.net:80/", "text/html", "200", "A"],
+    ]
+    assert resume_key == "opaque-resume-key"
+
+
+def test_fetch_cdx_records_paginates_with_resume_key_until_limit() -> None:
+    calls: list[str] = []
+
+    def fetcher(url: str) -> list[object]:
+        calls.append(url)
+        query = parse_qs(urlparse(url).query)
+        resume_key = query.get("resumeKey", [None])[0]
+        if resume_key is None:
+            return [
+                ["timestamp", "original", "mimetype", "statuscode", "digest"],
+                ["20020206001945", "http://www.somethingpositive.net:80/", "text/html", "200", "A"],
+                ["20020206002000", "http://www.somethingpositive.net:80/sp01012002.html", "text/html", "200", "B"],
+                [],
+                ["k1"],
+            ]
+        if resume_key == "k1":
+            return [
+                ["timestamp", "original", "mimetype", "statuscode", "digest"],
+                ["20020206003000", "http://www.somethingpositive.net:80/sp01022002.html", "text/html", "200", "C"],
+                [],
+                ["k2"],
+            ]
+        raise AssertionError(f"unexpected resume key: {resume_key}")
+
+    records = fetch_cdx_records(
+        domain="somethingpositive.net",
+        from_timestamp="20020101000000",
+        to_timestamp="20021231235959",
+        limit=3,
+        fetcher=fetcher,
+    )
+
+    assert len(records) == 3
+    assert [record.original for record in records] == [
+        "http://www.somethingpositive.net:80/",
+        "http://www.somethingpositive.net:80/sp01012002.html",
+        "http://www.somethingpositive.net:80/sp01022002.html",
+    ]
+    assert len(calls) == 2
+    first_query = parse_qs(urlparse(calls[0]).query)
+    second_query = parse_qs(urlparse(calls[1]).query)
+    assert first_query["limit"] == ["3"]
+    assert "resumeKey" not in first_query
+    assert second_query["resumeKey"] == ["k1"]
+    assert second_query["limit"] == ["1"]
+
+
+def test_fetch_cdx_records_stops_when_resume_key_repeats() -> None:
+    calls: list[str] = []
+
+    def fetcher(url: str) -> list[object]:
+        calls.append(url)
+        query = parse_qs(urlparse(url).query)
+        resume_key = query.get("resumeKey", [None])[0]
+        if resume_key is None:
+            return [
+                ["timestamp", "original", "mimetype", "statuscode", "digest"],
+                ["20020206001945", "http://www.somethingpositive.net:80/", "text/html", "200", "A"],
+                [],
+                ["k1"],
+            ]
+        return [
+            ["timestamp", "original", "mimetype", "statuscode", "digest"],
+            ["20020206002000", "http://www.somethingpositive.net:80/sp01012002.html", "text/html", "200", "B"],
+            [],
+            ["k1"],
+        ]
+
+    records = fetch_cdx_records(
+        domain="somethingpositive.net",
+        from_timestamp="20020101000000",
+        to_timestamp="20021231235959",
+        limit=50,
+        fetcher=fetcher,
+    )
+
+    assert len(records) == 2
+    assert len(calls) == 2

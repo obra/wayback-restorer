@@ -13,6 +13,7 @@ from sp_recovery.url_utils import canonical_identity_key
 
 CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
 DEFAULT_FIELDS = ("timestamp", "original", "mimetype", "statuscode", "digest")
+DEFAULT_CDX_PAGE_SIZE = 5_000
 # Preferred by Jesse: prioritize latest pre-outage captures first.
 DEFAULT_PREFERRED_WINDOWS = (
     ("20230101000000", "20250201235959"),
@@ -29,7 +30,7 @@ class CaptureRecord:
     digest: str | None = None
 
 
-CDXFetcher = Callable[[str], list[list[str]]]
+CDXFetcher = Callable[[str], list[object]]
 
 
 def parse_cdx_rows(rows: Sequence[Sequence[str]]) -> list[CaptureRecord]:
@@ -168,7 +169,7 @@ def capture_from_dict(payload: dict[str, Any]) -> CaptureRecord:
     )
 
 
-def _fetch_cdx_rows(url: str) -> list[list[str]]:
+def _fetch_cdx_rows(url: str) -> list[object]:
     request = Request(url, headers={"User-Agent": "sp-recovery/0.1 (+archive-friendly)"})
     with urlopen(request, timeout=60) as response:
         payload = response.read().decode("utf-8")
@@ -176,6 +177,24 @@ def _fetch_cdx_rows(url: str) -> list[list[str]]:
     if not isinstance(parsed, list):
         return []
     return parsed
+
+
+def split_cdx_rows_and_resume_key(payload: Sequence[object]) -> tuple[list[list[str]], str | None]:
+    rows: list[list[str]] = []
+    resume_key: str | None = None
+
+    for item in payload:
+        if not isinstance(item, list):
+            continue
+        if not item:
+            continue
+        if len(item) == 1 and isinstance(item[0], str):
+            resume_key = item[0]
+            continue
+        if all(isinstance(value, str) for value in item):
+            rows.append([str(value) for value in item])
+
+    return rows, resume_key
 
 
 def fetch_cdx_records(
@@ -186,17 +205,49 @@ def fetch_cdx_records(
     limit: int,
     fetcher: CDXFetcher | None = None,
 ) -> list[CaptureRecord]:
-    url = build_cdx_query_url(
-        url_pattern=f"{domain}/*",
-        from_timestamp=from_timestamp,
-        to_timestamp=to_timestamp,
-        limit=limit if limit > 0 else None,
-    )
-
     active_fetcher = fetcher or _fetch_cdx_rows
-    try:
-        rows = active_fetcher(url)
-    except (HTTPError, URLError, TimeoutError):
-        return []
+    collected: list[CaptureRecord] = []
+    resume_key: str | None = None
+    remaining = limit if limit > 0 else None
 
-    return parse_cdx_rows(rows)
+    while True:
+        page_limit = DEFAULT_CDX_PAGE_SIZE
+        if remaining is not None:
+            if remaining <= 0:
+                break
+            page_limit = min(page_limit, remaining)
+
+        url = build_cdx_query_url(
+            url_pattern=f"{domain}/*",
+            from_timestamp=from_timestamp,
+            to_timestamp=to_timestamp,
+            resume_key=resume_key,
+            limit=page_limit,
+        )
+
+        try:
+            payload = active_fetcher(url)
+        except (HTTPError, URLError, TimeoutError):
+            break
+
+        rows, next_resume_key = split_cdx_rows_and_resume_key(payload)
+        page_records = parse_cdx_rows(rows)
+        collected.extend(page_records)
+
+        if remaining is not None:
+            remaining -= len(page_records)
+            if remaining <= 0:
+                break
+
+        if not next_resume_key:
+            break
+        if next_resume_key == resume_key:
+            break
+        if not page_records:
+            break
+
+        resume_key = next_resume_key
+
+    if limit > 0:
+        return collected[:limit]
+    return collected
