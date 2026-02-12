@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
+from urllib.error import HTTPError
 from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from sp_recovery.discovery import CaptureRecord
 from sp_recovery.io_utils import sha256_hex, write_bytes
@@ -50,8 +52,12 @@ def local_relpath_from_original(original_url: str) -> str:
 
 
 def _default_fetcher(source_url: str) -> tuple[int, bytes]:
-    with urlopen(source_url, timeout=30) as response:
-        return response.status, response.read()
+    request = Request(source_url, headers={"User-Agent": "sp-recovery/0.1 (+archive-friendly)"})
+    try:
+        with urlopen(request, timeout=30) as response:
+            return response.status, response.read()
+    except HTTPError as error:
+        return error.code, error.read()
 
 
 def recover_capture(
@@ -76,7 +82,17 @@ def recover_capture(
         )
 
     active_fetcher = fetcher or _default_fetcher
-    status_code, payload = active_fetcher(source_url)
+    try:
+        status_code, payload = active_fetcher(source_url)
+    except Exception:
+        return ProvenanceRecord(
+            original_url=capture.original,
+            timestamp=capture.timestamp,
+            source_url=source_url,
+            local_path=local_relpath,
+            sha256="",
+            status="fetch_error",
+        )
 
     status = "recovered" if status_code == 200 else f"fetch_failed_{status_code}"
     if status_code == 200:
@@ -90,3 +106,20 @@ def recover_capture(
         sha256=sha256_hex(payload),
         status=status,
     )
+
+
+def recover_captures(
+    captures: Sequence[CaptureRecord],
+    *,
+    output_root: Path,
+    request_interval_seconds: float,
+    fetcher: Fetcher | None = None,
+) -> list[ProvenanceRecord]:
+    recovered: list[ProvenanceRecord] = []
+    for index, capture in enumerate(captures):
+        if index > 0 and request_interval_seconds > 0:
+            time.sleep(request_interval_seconds)
+
+        recovered.append(recover_capture(capture, output_root=output_root, fetcher=fetcher))
+
+    return recovered

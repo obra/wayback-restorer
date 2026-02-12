@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
 DEFAULT_FIELDS = ("timestamp", "original", "mimetype", "statuscode", "digest")
 # Preferred by Jesse: prioritize latest pre-outage captures first.
 DEFAULT_PREFERRED_WINDOWS = (
-    ("20230101000000", "20250201000000"),
-    ("20210101000000", "20250201000000"),
+    ("20230101000000", "20250201235959"),
+    ("20210101000000", "20250201235959"),
 )
 
 
@@ -23,6 +25,9 @@ class CaptureRecord:
     mimetype: str
     statuscode: int
     digest: str | None = None
+
+
+CDXFetcher = Callable[[str], list[list[str]]]
 
 
 def parse_cdx_rows(rows: Sequence[Sequence[str]]) -> list[CaptureRecord]:
@@ -42,7 +47,11 @@ def parse_cdx_rows(rows: Sequence[Sequence[str]]) -> list[CaptureRecord]:
 
     parsed: list[CaptureRecord] = []
     for row in data_rows:
-        row_map = {field_names[index]: value for index, value in enumerate(row) if index < len(field_names)}
+        row_map = {
+            field_names[index]: value
+            for index, value in enumerate(row)
+            if index < len(field_names)
+        }
         if "timestamp" not in row_map or "original" not in row_map:
             continue
 
@@ -66,6 +75,7 @@ def build_cdx_query_url(
     to_timestamp: str,
     resume_key: str | None = None,
     fields: Iterable[str] = DEFAULT_FIELDS,
+    limit: int | None = None,
 ) -> str:
     params: dict[str, str] = {
         "url": url_pattern,
@@ -74,15 +84,15 @@ def build_cdx_query_url(
         "output": "json",
         "fl": ",".join(fields),
         "showResumeKey": "true",
+        "matchType": "domain",
+        "filter": "statuscode:200",
     }
     if resume_key:
         params["resumeKey"] = resume_key
+    if limit and limit > 0:
+        params["limit"] = str(limit)
 
     return f"{CDX_ENDPOINT}?{urlencode(params)}"
-
-
-def _parse_timestamp(timestamp: str) -> datetime:
-    return datetime.strptime(timestamp, "%Y%m%d%H%M%S").replace(tzinfo=UTC)
 
 
 def _window_rank(timestamp: str, preferred_windows: Sequence[tuple[str, str]]) -> int:
@@ -133,3 +143,57 @@ def canonicalize_by_original_url(
             canonical[original_url] = selected
 
     return canonical
+
+
+def capture_to_dict(capture: CaptureRecord) -> dict[str, Any]:
+    return {
+        "timestamp": capture.timestamp,
+        "original": capture.original,
+        "mimetype": capture.mimetype,
+        "statuscode": capture.statuscode,
+        "digest": capture.digest or "",
+    }
+
+
+def capture_from_dict(payload: dict[str, Any]) -> CaptureRecord:
+    return CaptureRecord(
+        timestamp=str(payload["timestamp"]),
+        original=str(payload["original"]),
+        mimetype=str(payload.get("mimetype", "application/octet-stream")),
+        statuscode=int(payload.get("statuscode", 0)),
+        digest=str(payload.get("digest") or "") or None,
+    )
+
+
+def _fetch_cdx_rows(url: str) -> list[list[str]]:
+    request = Request(url, headers={"User-Agent": "sp-recovery/0.1 (+archive-friendly)"})
+    with urlopen(request, timeout=30) as response:
+        payload = response.read().decode("utf-8")
+    parsed = json.loads(payload)
+    if not isinstance(parsed, list):
+        return []
+    return parsed
+
+
+def fetch_cdx_records(
+    *,
+    domain: str,
+    from_timestamp: str,
+    to_timestamp: str,
+    limit: int,
+    fetcher: CDXFetcher | None = None,
+) -> list[CaptureRecord]:
+    url = build_cdx_query_url(
+        url_pattern=f"{domain}/*",
+        from_timestamp=from_timestamp,
+        to_timestamp=to_timestamp,
+        limit=limit if limit > 0 else None,
+    )
+
+    active_fetcher = fetcher or _fetch_cdx_rows
+    try:
+        rows = active_fetcher(url)
+    except (HTTPError, URLError, TimeoutError):
+        return []
+
+    return parse_cdx_rows(rows)
