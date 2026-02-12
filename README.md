@@ -1,12 +1,8 @@
-# Something Positive Mirror Recovery Toolkit
+# Wayback Mirror Recovery Toolkit (sp-recovery)
 
-This project rebuilds a hostable mirror of the publicly archived pre-modern `somethingpositive.net` site, with conservative request pacing and full provenance.
+This project rebuilds a hostable, browseable mirror of a public website using Internet Archive Wayback Machine captures, with conservative request pacing and explicit provenance.
 
-It is designed to:
-- recover as much public comic history as possible,
-- avoid unnecessary load on upstream archives,
-- produce a mirror that works without live archive traffic for normal readers,
-- show exactly what was recovered vs. missing.
+It started as a recovery effort for Something Positive. The name stuck. The tool is general.
 
 ## What This Tool Does
 
@@ -32,28 +28,28 @@ The pipeline does six things:
 
 No third-party runtime dependencies are required.
 
-## Full Run Command (Pre-Modern Scheme Cutoff)
+## Full Run Command
 
-Run this from the repository root:
+Run this from the repository root (replace the placeholders):
 
 ```bash
 python3 -m sp_recovery.cli run \
-  --domain somethingpositive.net \
-  --canonical-host somethingpositive.net \
-  --equivalent-host somethingpositive.net \
-  --equivalent-host www.somethingpositive.net \
-  --from-date 2001-01-01 \
-  --to-date 2025-02-01 \
-  --modern-cutoff-date 2025-02-01 \
+  --domain example.org \
+  --canonical-host example.org \
+  --equivalent-host example.org \
+  --equivalent-host www.example.org \
+  --from-date 2000-01-01 \
+  --to-date 2024-01-01 \
+  --modern-cutoff-date 2024-01-01 \
   --max-canonical 0 \
   --request-interval-seconds 2.0 \
-  --output-root output/full-pre2025
+  --output-root output/example-mirror
 ```
 
 Notes:
 - `--max-canonical 0` means "no cap" (recover all selected canonical URLs).
 - `--modern-cutoff-date` acts as a restore-as-of boundary (captures on/after this date are excluded).
-- Recovery ordering only affects fetch sequence. It does not affect final completeness when `--max-canonical 0`.
+- Host equivalence is explicit. If you omit `--equivalent-host`, the default is `{canonical_host, www.<canonical_host>}`.
 
 ## Safe Resume
 
@@ -70,17 +66,17 @@ After a baseline run, target only known gaps:
 
 ```bash
 python3 -m sp_recovery.cli run \
-  --domain somethingpositive.net \
-  --canonical-host somethingpositive.net \
-  --equivalent-host somethingpositive.net \
-  --equivalent-host www.somethingpositive.net \
-  --from-date 2001-01-01 \
-  --to-date 2025-02-01 \
-  --modern-cutoff-date 2025-02-01 \
+  --domain example.org \
+  --canonical-host example.org \
+  --equivalent-host example.org \
+  --equivalent-host www.example.org \
+  --from-date 2000-01-01 \
+  --to-date 2024-01-01 \
+  --modern-cutoff-date 2024-01-01 \
   --max-canonical 0 \
   --request-interval-seconds 2.0 \
-  --only-missing-from output/full-pre2025/reports/gap_register.csv \
-  --output-root output/full-pre2025
+  --only-missing-from output/example-mirror/reports/gap_register.csv \
+  --output-root output/example-mirror
 ```
 
 ## Output Layout
@@ -88,8 +84,8 @@ python3 -m sp_recovery.cli run \
 Example output tree:
 
 ```text
-output/full-pre2025/
-  somethingpositive.net/...
+output/example-mirror/
+  example.org/...
   reports/
     coverage_report.md
     gap_register.csv
@@ -129,12 +125,12 @@ Internal links are rewritten to relative paths, so direct `file://` browsing wor
 If you prefer a local web server:
 
 ```bash
-cd output/full-pre2025
+cd output/example-mirror
 python3 -m http.server 8000
 ```
 
 Then open:
-- `http://127.0.0.1:8000/somethingpositive.net/`
+- `http://127.0.0.1:8000/example.org/`
 
 ## CLI Commands
 
@@ -168,6 +164,43 @@ python3 -m sp_recovery.cli run --help
 - Avoid repeated broad reruns when gap-targeted reruns are sufficient.
 - Keep host equivalence explicit to avoid duplicate recovery for host aliases.
 - Keep the same `--output-root` for resumability and clean audit trails.
+
+## Worked Example: Something Positive (Pre-Modern Scheme Cutoff)
+
+This is the original use case that shaped the defaults and tests.
+
+Full run:
+
+```bash
+python3 -m sp_recovery.cli run \
+  --domain somethingpositive.net \
+  --canonical-host somethingpositive.net \
+  --equivalent-host somethingpositive.net \
+  --equivalent-host www.somethingpositive.net \
+  --from-date 2001-01-01 \
+  --to-date 2025-02-01 \
+  --modern-cutoff-date 2025-02-01 \
+  --max-canonical 0 \
+  --request-interval-seconds 2.0 \
+  --output-root output/full-pre2025
+```
+
+Gap-focused rerun:
+
+```bash
+python3 -m sp_recovery.cli run \
+  --domain somethingpositive.net \
+  --canonical-host somethingpositive.net \
+  --equivalent-host somethingpositive.net \
+  --equivalent-host www.somethingpositive.net \
+  --from-date 2001-01-01 \
+  --to-date 2025-02-01 \
+  --modern-cutoff-date 2025-02-01 \
+  --max-canonical 0 \
+  --request-interval-seconds 2.0 \
+  --only-missing-from output/full-pre2025/reports/gap_register.csv \
+  --output-root output/full-pre2025
+```
 
 ## Verification
 
