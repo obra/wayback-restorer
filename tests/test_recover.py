@@ -81,3 +81,25 @@ def test_recover_capture_emits_provenance_fields(tmp_path: Path) -> None:
     assert payload["source_url"] == build_wayback_replay_url(capture.timestamp, capture.original)
     assert payload["status"] == "recovered"
     assert payload["sha256"]
+
+
+def test_recover_capture_retries_after_transient_fetch_error(tmp_path: Path) -> None:
+    capture = CaptureRecord(
+        timestamp="20240201120000",
+        original="http://www.somethingpositive.net/sp02012024.html",
+        mimetype="text/html",
+        statuscode=200,
+        digest="D",
+    )
+    attempts = {"count": 0}
+
+    def fetcher(_: str) -> tuple[int, bytes]:
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise TimeoutError("temporary issue")
+        return (200, b"<html>ok</html>")
+
+    result = recover_capture(capture, output_root=tmp_path, fetcher=fetcher)
+
+    assert attempts["count"] == 2
+    assert result.status == "recovered"

@@ -54,7 +54,7 @@ def test_run_pipeline_creates_mirror_state_and_reports(tmp_path: Path) -> None:
 
     html_file = tmp_path / "somethingpositive.net" / "sp02012018.html"
     assert html_file.exists()
-    assert b"/somethingpositive.net/arch/sp02012018.gif" in html_file.read_bytes()
+    assert b"arch/sp02012018.gif" in html_file.read_bytes()
 
 
 def test_run_pipeline_can_target_only_missing_urls(tmp_path: Path) -> None:

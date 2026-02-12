@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import posixpath
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -82,6 +83,8 @@ def rewrite_html(
     known_local_paths: set[str],
 ) -> RewriteResult:
     unresolved: list[tuple[str, str]] = []
+    source_local_path = local_relpath_from_original(page_original_url)
+    source_dir = posixpath.dirname(source_local_path)
 
     def replace(match: re.Match[str]) -> str:
         attr = match.group("attr")
@@ -97,7 +100,8 @@ def rewrite_html(
         if local_path not in known_local_paths:
             unresolved.append((page_original_url, local_path))
 
-        rewritten = f"/{local_path}{suffix}"
+        relative_target = posixpath.relpath(local_path, start=source_dir)
+        rewritten = f"{relative_target}{suffix}"
         return f"{attr}={quote}{rewritten}{quote}"
 
     rewritten_html = _ATTR_PATTERN.sub(replace, html)

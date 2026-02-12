@@ -27,8 +27,8 @@ def test_rewrite_html_converts_internal_links_to_local_paths() -> None:
     )
 
     assert isinstance(result, RewriteResult)
-    assert 'href="/somethingpositive.net/sp02022024.html"' in result.html
-    assert 'src="/somethingpositive.net/arch/sp02012024.gif"' in result.html
+    assert 'href="sp02022024.html"' in result.html
+    assert 'src="arch/sp02012024.gif"' in result.html
     assert 'href="https://example.org/post"' in result.html
     assert result.unresolved_targets == []
 
@@ -63,9 +63,25 @@ def test_rewrite_html_handles_root_relative_internal_urls() -> None:
         },
     )
 
-    assert 'href="/somethingpositive.net/sp02022024.html"' in result.html
-    assert 'src="/somethingpositive.net/arch/sp02012024.gif"' in result.html
+    assert 'href="sp02022024.html"' in result.html
+    assert 'src="arch/sp02012024.gif"' in result.html
     assert result.unresolved_targets == []
+
+
+def test_rewrite_html_nested_page_uses_relative_path_to_site_root_targets() -> None:
+    html = '<a href="/sp01012002.html">root-strip</a><img src="/images/title.gif">'
+
+    result = rewrite_html(
+        html,
+        page_original_url="http://www.somethingpositive.net/archive/2001/index.html",
+        known_local_paths={
+            "somethingpositive.net/sp01012002.html",
+            "somethingpositive.net/images/title.gif",
+        },
+    )
+
+    assert 'href="../../sp01012002.html"' in result.html
+    assert 'src="../../images/title.gif"' in result.html
 
 
 def test_extract_internal_asset_urls_handles_root_relative_urls() -> None:

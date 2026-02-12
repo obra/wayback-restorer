@@ -15,6 +15,7 @@ from sp_recovery.io_utils import sha256_hex, write_bytes
 from sp_recovery.url_utils import normalize_site_host
 
 Fetcher = Callable[[str], tuple[int, bytes]]
+DEFAULT_FETCH_RETRIES = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,7 @@ def recover_capture(
     *,
     output_root: Path,
     fetcher: Fetcher | None = None,
+    max_retries: int = DEFAULT_FETCH_RETRIES,
 ) -> ProvenanceRecord:
     local_relpath = local_relpath_from_original(capture.original)
     destination = output_root / local_relpath
@@ -83,15 +85,24 @@ def recover_capture(
         )
 
     active_fetcher = fetcher or _default_fetcher
-    try:
-        status_code, payload = active_fetcher(source_url)
-    except Exception:
+    attempts = max(1, max_retries)
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            status_code, payload = active_fetcher(source_url)
+            break
+        except Exception as error:
+            last_error = error
+            if attempt + 1 < attempts:
+                time.sleep(0.5)
+            continue
+    else:
         return ProvenanceRecord(
             original_url=capture.original,
             timestamp=capture.timestamp,
             source_url=source_url,
             local_path=local_relpath,
-            sha256="",
+            sha256=f"{type(last_error).__name__}:{last_error}" if last_error else "",
             status="fetch_error",
         )
 
