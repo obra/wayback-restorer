@@ -349,3 +349,38 @@ def test_run_pipeline_recovers_referenced_strip_images(tmp_path: Path) -> None:
     provenance_lines = (tmp_path / "state" / "provenance.jsonl").read_text(encoding="utf-8").splitlines()
     parsed = [json.loads(line) for line in provenance_lines]
     assert any(row["local_path"] == "somethingpositive.net/arch/sp01012002.gif" for row in parsed)
+
+
+def test_run_pipeline_recovers_root_relative_strip_images(tmp_path: Path) -> None:
+    captures = [
+        CaptureRecord(
+            timestamp="20020206141527",
+            original="http://www.somethingpositive.net:80/sp01012002.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="PAGE",
+        )
+    ]
+
+    def fetcher(url: str) -> tuple[int, bytes]:
+        if url.endswith("/http://www.somethingpositive.net:80/sp01012002.html"):
+            return (200, b'<html><body><img src="/arch/sp01012002.gif"></body></html>')
+        if url.endswith("/http://somethingpositive.net/arch/sp01012002.gif"):
+            return (200, b"GIF89a")
+        return (404, b"")
+
+    config = RecoveryConfig(
+        domain="somethingpositive.net",
+        from_date="2001-01-01",
+        to_date="2019-12-31",
+        modern_cutoff_date="2020-01-01",
+        output_root=tmp_path,
+        max_canonical=1,
+        request_interval_seconds=0.0,
+        only_missing_urls=set(),
+    )
+
+    run_pipeline(config, discovered_records=captures, fetcher=fetcher)
+
+    image_path = tmp_path / "somethingpositive.net" / "arch" / "sp01012002.gif"
+    assert image_path.exists()

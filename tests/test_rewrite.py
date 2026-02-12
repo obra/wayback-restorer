@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sp_recovery.rewrite import RewriteResult, rewrite_html, write_unresolved_links_csv
+from sp_recovery.rewrite import (
+    RewriteResult,
+    extract_internal_asset_urls,
+    rewrite_html,
+    write_unresolved_links_csv,
+)
 
 
 def test_rewrite_html_converts_internal_links_to_local_paths() -> None:
@@ -44,3 +49,38 @@ def test_unresolved_internal_targets_are_written_to_csv(tmp_path: Path) -> None:
         lines[1]
         == "http://www.somethingpositive.net/sp02012024.html,somethingpositive.net/sp99999999.html"
     )
+
+
+def test_rewrite_html_handles_root_relative_internal_urls() -> None:
+    html = '<a href="/sp02022024.html">next</a><img src="/arch/sp02012024.gif" />'
+
+    result = rewrite_html(
+        html,
+        page_original_url="http://www.somethingpositive.net:80/sp02012024.html",
+        known_local_paths={
+            "somethingpositive.net/sp02022024.html",
+            "somethingpositive.net/arch/sp02012024.gif",
+        },
+    )
+
+    assert 'href="/somethingpositive.net/sp02022024.html"' in result.html
+    assert 'src="/somethingpositive.net/arch/sp02012024.gif"' in result.html
+    assert result.unresolved_targets == []
+
+
+def test_extract_internal_asset_urls_handles_root_relative_urls() -> None:
+    html = (
+        '<img src="/arch/sp02012024.gif" />'
+        '<img src="images/title.gif" />'
+        '<img src="https://example.org/outside.gif" />'
+    )
+
+    extracted = extract_internal_asset_urls(
+        html,
+        page_original_url="http://www.somethingpositive.net:80/sp02012024.html",
+    )
+
+    assert extracted == [
+        "http://somethingpositive.net/arch/sp02012024.gif",
+        "http://somethingpositive.net/images/title.gif",
+    ]
