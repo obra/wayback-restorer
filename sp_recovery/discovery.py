@@ -1,0 +1,135 @@
+"""CDX discovery and capture selection helpers."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Iterable, Sequence
+from urllib.parse import urlencode
+
+CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
+DEFAULT_FIELDS = ("timestamp", "original", "mimetype", "statuscode", "digest")
+# Preferred by Jesse: prioritize latest pre-outage captures first.
+DEFAULT_PREFERRED_WINDOWS = (
+    ("20230101000000", "20250201000000"),
+    ("20210101000000", "20250201000000"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureRecord:
+    timestamp: str
+    original: str
+    mimetype: str
+    statuscode: int
+    digest: str | None = None
+
+
+def parse_cdx_rows(rows: Sequence[Sequence[str]]) -> list[CaptureRecord]:
+    if not rows:
+        return []
+
+    field_names: Sequence[str]
+    data_rows: Sequence[Sequence[str]]
+
+    first_row = rows[0]
+    if first_row and first_row[0] == "timestamp":
+        field_names = first_row
+        data_rows = rows[1:]
+    else:
+        field_names = DEFAULT_FIELDS
+        data_rows = rows
+
+    parsed: list[CaptureRecord] = []
+    for row in data_rows:
+        row_map = {field_names[index]: value for index, value in enumerate(row) if index < len(field_names)}
+        if "timestamp" not in row_map or "original" not in row_map:
+            continue
+
+        parsed.append(
+            CaptureRecord(
+                timestamp=row_map["timestamp"],
+                original=row_map["original"],
+                mimetype=row_map.get("mimetype", "application/octet-stream"),
+                statuscode=int(row_map.get("statuscode", "0") or 0),
+                digest=row_map.get("digest"),
+            )
+        )
+
+    return parsed
+
+
+def build_cdx_query_url(
+    *,
+    url_pattern: str,
+    from_timestamp: str,
+    to_timestamp: str,
+    resume_key: str | None = None,
+    fields: Iterable[str] = DEFAULT_FIELDS,
+) -> str:
+    params: dict[str, str] = {
+        "url": url_pattern,
+        "from": from_timestamp,
+        "to": to_timestamp,
+        "output": "json",
+        "fl": ",".join(fields),
+        "showResumeKey": "true",
+    }
+    if resume_key:
+        params["resumeKey"] = resume_key
+
+    return f"{CDX_ENDPOINT}?{urlencode(params)}"
+
+
+def _parse_timestamp(timestamp: str) -> datetime:
+    return datetime.strptime(timestamp, "%Y%m%d%H%M%S").replace(tzinfo=UTC)
+
+
+def _window_rank(timestamp: str, preferred_windows: Sequence[tuple[str, str]]) -> int:
+    for index, (start, end) in enumerate(preferred_windows):
+        if start <= timestamp <= end:
+            return index
+    return len(preferred_windows)
+
+
+def _mimetype_rank(mimetype: str) -> int:
+    if mimetype == "text/html" or mimetype.startswith("image/"):
+        return 0
+    return 1
+
+
+def choose_canonical_capture(
+    captures: Sequence[CaptureRecord],
+    *,
+    preferred_windows: Sequence[tuple[str, str]] = DEFAULT_PREFERRED_WINDOWS,
+) -> CaptureRecord | None:
+    if not captures:
+        return None
+
+    def rank(record: CaptureRecord) -> tuple[int, int, int, int]:
+        status_rank = 0 if record.statuscode == 200 else 1
+        mime_rank = _mimetype_rank(record.mimetype)
+        window_rank = _window_rank(record.timestamp, preferred_windows)
+        # Prefer newer captures within the same quality/window bucket.
+        recency_rank = -int(record.timestamp)
+        return (status_rank, mime_rank, window_rank, recency_rank)
+
+    return min(captures, key=rank)
+
+
+def canonicalize_by_original_url(
+    captures: Sequence[CaptureRecord],
+    *,
+    preferred_windows: Sequence[tuple[str, str]] = DEFAULT_PREFERRED_WINDOWS,
+) -> dict[str, CaptureRecord]:
+    grouped: dict[str, list[CaptureRecord]] = {}
+    for capture in captures:
+        grouped.setdefault(capture.original, []).append(capture)
+
+    canonical: dict[str, CaptureRecord] = {}
+    for original_url, options in grouped.items():
+        selected = choose_canonical_capture(options, preferred_windows=preferred_windows)
+        if selected is not None:
+            canonical[original_url] = selected
+
+    return canonical
