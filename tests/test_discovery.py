@@ -133,6 +133,60 @@ def test_canonicalize_by_original_url_dedupes_www_and_default_port() -> None:
     }
 
 
+def test_canonicalize_by_original_url_respects_explicit_host_equivalence_policy() -> None:
+    captures = [
+        CaptureRecord(
+            timestamp="20020206141527",
+            original="http://www.example.org:80/sp01012002.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="A",
+        ),
+        CaptureRecord(
+            timestamp="20020206142000",
+            original="http://example.org/sp01012002.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="B",
+        ),
+    ]
+
+    canonical = canonicalize_by_original_url(
+        captures,
+        canonical_host="mirror.example.org",
+        equivalent_hosts=("example.org", "www.example.org", "mirror.example.org"),
+    )
+
+    assert set(canonical.keys()) == {"mirror.example.org/sp01012002.html"}
+
+
+def test_canonicalize_by_original_url_can_disable_www_dedupe() -> None:
+    captures = [
+        CaptureRecord(
+            timestamp="20020206141527",
+            original="http://www.example.org:80/sp01012002.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="A",
+        ),
+        CaptureRecord(
+            timestamp="20020206142000",
+            original="http://example.org/sp01012002.html",
+            mimetype="text/html",
+            statuscode=200,
+            digest="B",
+        ),
+    ]
+
+    canonical = canonicalize_by_original_url(
+        captures,
+        canonical_host="example.org",
+        equivalent_hosts=("example.org",),
+    )
+
+    assert len(canonical) == 2
+
+
 def test_split_cdx_rows_and_resume_key_handles_wayback_json_shape() -> None:
     payload = [
         ["timestamp", "original", "mimetype", "statuscode", "digest"],

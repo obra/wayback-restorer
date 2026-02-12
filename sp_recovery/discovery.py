@@ -9,7 +9,11 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from sp_recovery.url_utils import canonical_identity_key
+from sp_recovery.url_utils import (
+    DEFAULT_CANONICAL_SITE_HOST,
+    DEFAULT_EQUIVALENT_SITE_HOSTS,
+    canonical_identity_key,
+)
 
 CDX_ENDPOINT = "https://web.archive.org/cdx/search/cdx"
 DEFAULT_FIELDS = ("timestamp", "original", "mimetype", "statuscode", "digest")
@@ -135,10 +139,19 @@ def canonicalize_by_original_url(
     captures: Sequence[CaptureRecord],
     *,
     preferred_windows: Sequence[tuple[str, str]] = DEFAULT_PREFERRED_WINDOWS,
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Sequence[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
 ) -> dict[str, CaptureRecord]:
     grouped: dict[str, list[CaptureRecord]] = {}
     for capture in captures:
-        grouped.setdefault(canonical_identity_key(capture.original), []).append(capture)
+        grouped.setdefault(
+            canonical_identity_key(
+                capture.original,
+                canonical_host=canonical_host,
+                equivalent_hosts=equivalent_hosts,
+            ),
+            [],
+        ).append(capture)
 
     canonical: dict[str, CaptureRecord] = {}
     for identity_key, options in grouped.items():

@@ -12,7 +12,9 @@ from sp_recovery.config import (
     DEFAULT_MODERN_CUTOFF_DATE,
     DEFAULT_TO_DATE,
     RecoveryConfig,
+    default_equivalent_hosts,
     load_missing_urls_from_gap_csv,
+    normalize_equivalent_hosts,
 )
 from sp_recovery.discovery import capture_from_dict, capture_to_dict
 from sp_recovery.io_utils import read_jsonl, write_jsonl
@@ -23,6 +25,7 @@ from sp_recovery.pipeline import (
     run_report_only,
 )
 from sp_recovery.rewrite import rewrite_recovered_html_files
+from sp_recovery.url_utils import canonical_identity_key
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -38,6 +41,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-canonical", type=int, default=0)
     parser.add_argument("--request-interval-seconds", type=float, default=2.0)
     parser.add_argument(
+        "--canonical-host",
+        default=None,
+        help="Canonical host to use in mirror paths and rewritten internal URLs.",
+    )
+    parser.add_argument(
+        "--equivalent-host",
+        action="append",
+        default=[],
+        help="Additional host to treat as equivalent to canonical host (repeatable).",
+    )
+    parser.add_argument(
         "--only-missing-from",
         type=Path,
         default=None,
@@ -46,6 +60,12 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _config_from_args(args: argparse.Namespace) -> RecoveryConfig:
+    canonical_host = args.canonical_host or args.domain
+    if args.equivalent_host:
+        equivalent_hosts = normalize_equivalent_hosts(args.equivalent_host)
+    else:
+        equivalent_hosts = default_equivalent_hosts(canonical_host)
+
     return RecoveryConfig(
         domain=args.domain,
         from_date=args.from_date,
@@ -55,6 +75,8 @@ def _config_from_args(args: argparse.Namespace) -> RecoveryConfig:
         max_canonical=max(args.max_canonical, 0),
         request_interval_seconds=max(args.request_interval_seconds, 0.0),
         only_missing_urls=load_missing_urls_from_gap_csv(args.only_missing_from),
+        canonical_host=canonical_host,
+        equivalent_hosts=equivalent_hosts,
     )
 
 
@@ -78,8 +100,23 @@ def _recover_command(args: argparse.Namespace) -> int:
     canonical_rows = read_jsonl(state_dir / "canonical_urls.jsonl")
     canonical_records = [capture_from_dict(row) for row in canonical_rows]
     if config.only_missing_urls:
+        missing_keys = {
+            canonical_identity_key(
+                url,
+                canonical_host=config.canonical_host,
+                equivalent_hosts=config.equivalent_hosts,
+            )
+            for url in config.only_missing_urls
+        }
         canonical_records = [
-            row for row in canonical_records if row.original in config.only_missing_urls
+            row
+            for row in canonical_records
+            if canonical_identity_key(
+                row.original,
+                canonical_host=config.canonical_host,
+                equivalent_hosts=config.equivalent_hosts,
+            )
+            in missing_keys
         ]
 
     recovered = recover_phase(config, canonical_records)
@@ -89,6 +126,8 @@ def _recover_command(args: argparse.Namespace) -> int:
         config.output_root,
         recovered,
         unresolved_csv_path=state_dir / "unresolved_links.csv",
+        canonical_host=config.canonical_host,
+        equivalent_hosts=config.equivalent_hosts,
     )
 
     print(f"Recovered artifacts: {len(recovered)}")

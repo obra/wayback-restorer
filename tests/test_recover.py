@@ -30,6 +30,17 @@ def test_local_relpath_from_original_is_deterministic() -> None:
     )
 
 
+def test_local_relpath_from_original_respects_configured_equivalent_hosts() -> None:
+    assert (
+        local_relpath_from_original(
+            "http://www.example.org/sp02012024.html",
+            canonical_host="mirror.example.org",
+            equivalent_hosts={"example.org", "www.example.org", "mirror.example.org"},
+        )
+        == "mirror.example.org/sp02012024.html"
+    )
+
+
 def test_build_wayback_replay_url_uses_id_mode() -> None:
     assert (
         build_wayback_replay_url(

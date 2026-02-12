@@ -20,3 +20,5 @@ def test_effective_to_timestamp_respects_modern_cutoff() -> None:
     assert config.from_timestamp == "20010101000000"
     assert config.to_timestamp == "20250201235959"
     assert config.effective_to_timestamp == "20191231235959"
+    assert config.canonical_host == "somethingpositive.net"
+    assert config.equivalent_hosts == frozenset({"somethingpositive.net", "www.somethingpositive.net"})

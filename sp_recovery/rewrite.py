@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Collection
 import posixpath
 import re
 from dataclasses import dataclass
@@ -12,7 +13,12 @@ from urllib.parse import urljoin, urlparse
 
 from sp_recovery.io_utils import ensure_parent_dir
 from sp_recovery.recover import ProvenanceRecord, local_relpath_from_original
-from sp_recovery.url_utils import canonical_internal_url, is_internal_site_netloc
+from sp_recovery.url_utils import (
+    DEFAULT_CANONICAL_SITE_HOST,
+    DEFAULT_EQUIVALENT_SITE_HOSTS,
+    canonical_internal_url,
+    is_internal_site_netloc,
+)
 
 _ATTR_PATTERN = re.compile(
     r"(?P<attr>href|src)=(?P<quote>['\"])(?P<value>.*?)(?P=quote)",
@@ -50,7 +56,13 @@ def _extract_wayback_original(absolute_url: str) -> str:
     return absolute_url
 
 
-def _resolve_internal_target(raw_value: str, page_original_url: str) -> InternalTarget | None:
+def _resolve_internal_target(
+    raw_value: str,
+    page_original_url: str,
+    *,
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
+) -> InternalTarget | None:
     lowered = raw_value.lower()
     if lowered.startswith(("#", "mailto:", "javascript:", "data:")):
         return None
@@ -61,13 +73,25 @@ def _resolve_internal_target(raw_value: str, page_original_url: str) -> Internal
 
     if parsed.scheme not in {"http", "https"}:
         return None
-    if not is_internal_site_netloc(parsed.netloc):
+    if not is_internal_site_netloc(
+        parsed.netloc,
+        canonical_host=canonical_host,
+        equivalent_hosts=equivalent_hosts,
+    ):
         return None
     if parsed.query:
         return None
 
-    normalized_url = canonical_internal_url(original)
-    local_path = local_relpath_from_original(normalized_url)
+    normalized_url = canonical_internal_url(
+        original,
+        canonical_host=canonical_host,
+        equivalent_hosts=equivalent_hosts,
+    )
+    local_path = local_relpath_from_original(
+        normalized_url,
+        canonical_host=canonical_host,
+        equivalent_hosts=equivalent_hosts,
+    )
     fragment = parsed.fragment
     return InternalTarget(
         normalized_url=normalized_url,
@@ -81,9 +105,15 @@ def rewrite_html(
     *,
     page_original_url: str,
     known_local_paths: set[str],
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
 ) -> RewriteResult:
     unresolved: list[tuple[str, str]] = []
-    source_local_path = local_relpath_from_original(page_original_url)
+    source_local_path = local_relpath_from_original(
+        page_original_url,
+        canonical_host=canonical_host,
+        equivalent_hosts=equivalent_hosts,
+    )
     source_dir = posixpath.dirname(source_local_path)
 
     def replace(match: re.Match[str]) -> str:
@@ -91,7 +121,12 @@ def rewrite_html(
         quote = match.group("quote")
         raw_value = match.group("value")
 
-        resolved = _resolve_internal_target(raw_value, page_original_url)
+        resolved = _resolve_internal_target(
+            raw_value,
+            page_original_url,
+            canonical_host=canonical_host,
+            equivalent_hosts=equivalent_hosts,
+        )
         if resolved is None:
             return match.group(0)
 
@@ -108,14 +143,25 @@ def rewrite_html(
     return RewriteResult(html=rewritten_html, unresolved_targets=unresolved)
 
 
-def extract_internal_asset_urls(html: str, *, page_original_url: str) -> list[str]:
+def extract_internal_asset_urls(
+    html: str,
+    *,
+    page_original_url: str,
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
+) -> list[str]:
     assets: list[str] = []
     for match in _ATTR_PATTERN.finditer(html):
         attr = match.group("attr").lower()
         if attr != "src":
             continue
         raw_value = match.group("value")
-        resolved = _resolve_internal_target(raw_value, page_original_url)
+        resolved = _resolve_internal_target(
+            raw_value,
+            page_original_url,
+            canonical_host=canonical_host,
+            equivalent_hosts=equivalent_hosts,
+        )
         if resolved is None:
             continue
         assets.append(resolved.normalized_url)
@@ -137,6 +183,8 @@ def rewrite_recovered_html_files(
     provenance_records: Sequence[ProvenanceRecord],
     *,
     unresolved_csv_path: Path,
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
 ) -> list[tuple[str, str]]:
     known_local_paths = {
         record.local_path
@@ -160,6 +208,8 @@ def rewrite_recovered_html_files(
             original_html,
             page_original_url=record.original_url,
             known_local_paths=known_local_paths,
+            canonical_host=canonical_host,
+            equivalent_hosts=equivalent_hosts,
         )
         if result.html != original_html:
             page_path.write_text(result.html, encoding="utf-8")

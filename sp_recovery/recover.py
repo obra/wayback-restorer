@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -12,7 +13,11 @@ from urllib.request import Request, urlopen
 
 from sp_recovery.discovery import CaptureRecord
 from sp_recovery.io_utils import sha256_hex, write_bytes
-from sp_recovery.url_utils import normalize_site_host
+from sp_recovery.url_utils import (
+    DEFAULT_CANONICAL_SITE_HOST,
+    DEFAULT_EQUIVALENT_SITE_HOSTS,
+    canonicalize_site_host,
+)
 
 Fetcher = Callable[[str], tuple[int, bytes]]
 DEFAULT_FETCH_RETRIES = 3
@@ -42,9 +47,18 @@ def build_wayback_replay_url(timestamp: str, original_url: str) -> str:
     return f"https://web.archive.org/web/{timestamp}id_/{original_url}"
 
 
-def local_relpath_from_original(original_url: str) -> str:
+def local_relpath_from_original(
+    original_url: str,
+    *,
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
+) -> str:
     parsed = urlparse(original_url)
-    host = normalize_site_host(parsed.netloc)
+    host = canonicalize_site_host(
+        parsed.netloc,
+        canonical_host=canonical_host,
+        equivalent_hosts=equivalent_hosts,
+    )
     path = parsed.path or "/"
     if path.endswith("/"):
         path = f"{path}index.html"
@@ -68,8 +82,14 @@ def recover_capture(
     output_root: Path,
     fetcher: Fetcher | None = None,
     max_retries: int = DEFAULT_FETCH_RETRIES,
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
 ) -> ProvenanceRecord:
-    local_relpath = local_relpath_from_original(capture.original)
+    local_relpath = local_relpath_from_original(
+        capture.original,
+        canonical_host=canonical_host,
+        equivalent_hosts=equivalent_hosts,
+    )
     destination = output_root / local_relpath
     source_url = build_wayback_replay_url(capture.timestamp, capture.original)
 
@@ -126,12 +146,22 @@ def recover_captures(
     output_root: Path,
     request_interval_seconds: float,
     fetcher: Fetcher | None = None,
+    canonical_host: str = DEFAULT_CANONICAL_SITE_HOST,
+    equivalent_hosts: Collection[str] = DEFAULT_EQUIVALENT_SITE_HOSTS,
 ) -> list[ProvenanceRecord]:
     recovered: list[ProvenanceRecord] = []
     for index, capture in enumerate(captures):
         if index > 0 and request_interval_seconds > 0:
             time.sleep(request_interval_seconds)
 
-        recovered.append(recover_capture(capture, output_root=output_root, fetcher=fetcher))
+        recovered.append(
+            recover_capture(
+                capture,
+                output_root=output_root,
+                fetcher=fetcher,
+                canonical_host=canonical_host,
+                equivalent_hosts=equivalent_hosts,
+            )
+        )
 
     return recovered
