@@ -1,0 +1,94 @@
+"""HTML rewriting utilities for standalone mirror browsing."""
+
+from __future__ import annotations
+
+import csv
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+from sp_recovery.io_utils import ensure_parent_dir
+from sp_recovery.recover import local_relpath_from_original
+
+INTERNAL_HOSTS = {"somethingpositive.net", "www.somethingpositive.net"}
+_ATTR_PATTERN = re.compile(r"(?P<attr>href|src)=(?P<quote>['\"])(?P<value>.*?)(?P=quote)", re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class RewriteResult:
+    html: str
+    unresolved_targets: list[tuple[str, str]]
+
+
+def _extract_wayback_original(absolute_url: str) -> str:
+    parsed = urlparse(absolute_url)
+    if parsed.netloc not in {"web.archive.org", "www.web.archive.org"}:
+        return absolute_url
+    if not parsed.path.startswith("/web/"):
+        return absolute_url
+
+    parts = parsed.path.split("/", maxsplit=3)
+    if len(parts) < 4:
+        return absolute_url
+
+    candidate = parts[3]
+    if candidate.startswith("http://") or candidate.startswith("https://"):
+        return candidate
+    return absolute_url
+
+
+def _normalize_internal_target(raw_value: str, page_original_url: str) -> tuple[str, str] | None:
+    lowered = raw_value.lower()
+    if lowered.startswith(("#", "mailto:", "javascript:", "data:")):
+        return None
+
+    absolute = urljoin(page_original_url, raw_value)
+    original = _extract_wayback_original(absolute)
+    parsed = urlparse(original)
+
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if parsed.netloc not in INTERNAL_HOSTS:
+        return None
+
+    local_path = local_relpath_from_original(original)
+    suffix = f"#{parsed.fragment}" if parsed.fragment else ""
+    return local_path, suffix
+
+
+def rewrite_html(
+    html: str,
+    *,
+    page_original_url: str,
+    known_local_paths: set[str],
+) -> RewriteResult:
+    unresolved: list[tuple[str, str]] = []
+
+    def replace(match: re.Match[str]) -> str:
+        attr = match.group("attr")
+        quote = match.group("quote")
+        raw_value = match.group("value")
+
+        normalized = _normalize_internal_target(raw_value, page_original_url)
+        if normalized is None:
+            return match.group(0)
+
+        local_path, suffix = normalized
+        if local_path not in known_local_paths:
+            unresolved.append((page_original_url, local_path))
+
+        rewritten = f"/{local_path}{suffix}"
+        return f"{attr}={quote}{rewritten}{quote}"
+
+    rewritten_html = _ATTR_PATTERN.sub(replace, html)
+    return RewriteResult(html=rewritten_html, unresolved_targets=unresolved)
+
+
+def write_unresolved_links_csv(path: Path, unresolved_targets: list[tuple[str, str]]) -> None:
+    ensure_parent_dir(path)
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["source_url", "target_local_path"])
+        for source_url, target in unresolved_targets:
+            writer.writerow([source_url, target])
