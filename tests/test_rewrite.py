@@ -100,3 +100,22 @@ def test_extract_internal_asset_urls_handles_root_relative_urls() -> None:
         "http://somethingpositive.net/arch/sp02012024.gif",
         "http://somethingpositive.net/images/title.gif",
     ]
+
+
+def test_rewrite_html_migrates_old_host_prefixed_mirror_paths() -> None:
+    html = (
+        '<a href="/somethingpositive.net/sp02022024.html">next</a>'
+        '<img src="/somethingpositive.net/arch/sp02012024.gif" />'
+    )
+
+    result = rewrite_html(
+        html,
+        page_original_url="http://www.somethingpositive.net:80/sp02012024.html",
+        known_local_paths={
+            "somethingpositive.net/sp02022024.html",
+            "somethingpositive.net/arch/sp02012024.gif",
+        },
+    )
+
+    assert 'href="sp02022024.html"' in result.html
+    assert 'src="arch/sp02012024.gif"' in result.html

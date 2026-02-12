@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from urllib.parse import urlparse
 
 CANONICAL_SITE_HOST = "somethingpositive.net"
+_MIRROR_PREFIX_RE = re.compile(r"^/(?:www\.)?somethingpositive\.net(?P<rest>/.*)?$", re.IGNORECASE)
 
 
 def normalize_site_host(netloc: str) -> str:
@@ -39,4 +41,7 @@ def canonical_identity_key(original_url: str) -> str:
 def canonical_internal_url(original_url: str) -> str:
     parsed = urlparse(original_url)
     path = parsed.path or "/"
+    mirror_match = _MIRROR_PREFIX_RE.match(path)
+    if mirror_match:
+        path = mirror_match.group("rest") or "/"
     return f"http://{CANONICAL_SITE_HOST}{path}"
